@@ -1,0 +1,1 @@
+{"id":"R3","name":"Glikolisis lanjutan (ringkas)","eq":"G6P + 2 ADP → Piruvat + 2 ATP","needs":["atp"],"requires":["R2"]}

@@ -1,0 +1,1 @@
+{"id":"R7","name":"Degradasi PGE2","eq":"PGE2 → ∅","needs":["aa","cox"],"requires":["R6"]}

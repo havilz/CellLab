@@ -1,0 +1,1 @@
+{"key":"inhibition-noncompetitive","name":"Inhibisi non-kompetitif","expression":"v / (1 + I / Ki)","status":"illustrative-baseline"}

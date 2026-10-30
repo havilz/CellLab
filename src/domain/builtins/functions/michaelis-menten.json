@@ -1,0 +1,1 @@
+{"key":"michaelis-menten","name":"Michaelis-Menten","expression":"Vmax * E * S / (Km + S)","status":"illustrative-baseline"}

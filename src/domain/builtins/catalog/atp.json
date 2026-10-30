@@ -1,0 +1,1 @@
+{"key":"atp","name":"ATP","cat":"metabolit","comp":"sitoplasma","ref":"ChEBI:15422","def":3.2,"min":0,"max":5,"step":0.1,"hint":"ATP awal. ADP awal diset 0,8 mM."}
