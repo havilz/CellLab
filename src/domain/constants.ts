@@ -22,7 +22,10 @@ export const CATALOG: Record<string, CatalogItem> = Object.fromEntries(
 );
 
 export const DEFAULT_DRUGS: Record<string, Drug> = Object.fromEntries(
-  [parasetamol, ibuprofen, dg2].map((drug) => [drug.key, drug as Drug])
+  [parasetamol, ibuprofen, dg2].map((drug) => [
+    `drug-${drug.key}`,
+    { ...drug, id: `drug-${drug.key}` } as Drug
+  ])
 );
 
 export const DEFAULT_SPECIES: Species[] = [

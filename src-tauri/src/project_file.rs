@@ -58,7 +58,10 @@ pub struct SimulationTask {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DrugDose {
-    pub drug_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drug_id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub drug_key: Option<String>,
     pub pct: f64,
     pub t0: f64,
     pub mode: DoseMode,

@@ -50,7 +50,7 @@ export interface Cell {
 }
 
 export interface DrugDose {
-  drugKey: string;
+  drugId: string;
   pct: number;
   t0: number;
   mode: DoseMode;

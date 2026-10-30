@@ -4,6 +4,7 @@ import { Project, SimulationTask, Cell, Drug } from '../../domain/entities';
 import { CATALOG, DEFAULT_REACTIONS } from '../../domain/constants';
 import { defaultIpcAdapter, PythonEngineStatus } from '../../adapters';
 import { SimulationResultBundle } from './CellCanvas';
+import { addOrUpdateCell, addOrUpdateDrug, addOrUpdateTask } from '../../usecases/project';
 import {
   DrugModal,
   CellModal,
@@ -23,6 +24,7 @@ interface WorkbenchProps {
   onDeleteSimulationRun?: (id: string) => Promise<void>;
   onOpenResult?: (bundle: SimulationResultBundle, tab: 'vis' | 'tab' | 'dat') => void;
   onSaveToBackend?: (project: Project) => Promise<Project>;
+  hasProjectFile?: boolean;
   onLoadFromBackend?: (name: string) => Promise<Project>;
   onOpenProjectFile?: () => Promise<Project>;
 }
@@ -74,6 +76,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
   onDeleteSimulationRun,
   onOpenResult,
   onSaveToBackend,
+  hasProjectFile = false,
   onLoadFromBackend,
   onOpenProjectFile
 }) => {
@@ -195,7 +198,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
           canEdit: true,
           canDelete: true,
           rows: drugs.map((d) => ({
-            id: d.key,
+            id: d.id || d.key,
             data: d,
             cols: [
               d.name,
@@ -275,7 +278,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
             data: t,
             cols: [
               t.name,
-              project.cells[t.cellName || '']?.name || cells.find((c) => c.id === t.cellId)?.name || '-',
+              cells.find((c) => c.id === t.cellId)?.name || '-',
               `${t.doses.length} obat`,
               t.doses.map((d) => `${d.pct}%`).join(', ') || 'Kontrol'
             ]
@@ -352,7 +355,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
 
   const handleEdit = () => {
     if (node === 'obat') {
-      const d = drugs.find((x) => x.key === selId);
+      const d = drugs.find((x) => (x.id || x.key) === selId);
       if (d) {
         setEditingDrug(d);
         setDrugModalOpen(true);
@@ -377,7 +380,8 @@ export const Workbench: React.FC<WorkbenchProps> = ({
       if (!confirm('Hapus obat ini?')) return;
       onUpdateProject((prev) => {
         const nextDrugs = { ...prev.drugs };
-        delete nextDrugs[selId];
+        const selectedDrug = drugs.find((drug) => (drug.id || drug.key) === selId);
+        if (selectedDrug) delete nextDrugs[selectedDrug.key];
         return { ...prev, drugs: nextDrugs };
       });
       setStatus('Obat dihapus');
@@ -444,6 +448,10 @@ export const Workbench: React.FC<WorkbenchProps> = ({
 
   // Save / Load / Export / Import handlers
   const handleOpenSaveDialog = () => {
+    if (hasProjectFile && onSaveToBackend) {
+      void handleSaveCurrentProject();
+      return;
+    }
     setSaveModalOpen(true);
   };
 
@@ -467,6 +475,18 @@ export const Workbench: React.FC<WorkbenchProps> = ({
       }
     } else {
       setStatus(`Proyek "${name}" disimpan lokal.`);
+    }
+  };
+
+  const handleSaveCurrentProject = async () => {
+    if (!onSaveToBackend) return;
+    setStatus(`Menyimpan pembaruan proyek "${project.name}"...`);
+    try {
+      const saved = await onSaveToBackend(project);
+      onUpdateProject(() => saved);
+      setStatus(`Pembaruan proyek "${saved.name}" berhasil disimpan.`);
+    } catch (err) {
+      setStatus(`Gagal menyimpan pembaruan: ${err}`);
     }
   };
 
@@ -553,7 +573,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
   // Detail panel renderer
   const renderDetail = () => {
     if (node === 'obat') {
-      const d = drugs.find((x) => x.key === selId) || drugs[0];
+      const d = drugs.find((x) => (x.id || x.key) === selId) || drugs[0];
       if (!d) return <p className="muted">Pilih obat untuk melihat detail.</p>;
       return (
         <div className="dpad dblock">
@@ -627,7 +647,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
           ) : (
             t.doses.map((d, i) => (
               <div key={i} className="rx">
-                <span>{project.drugs[d.drugKey]?.name || d.drugKey} {d.pct}% @ {d.t0} s ({d.mode})</span>
+                <span>{Object.values(project.drugs).find((drug) => (drug.id || `drug-${drug.key}`) === d.drugId)?.name || d.drugId} {d.pct}% @ {d.t0} s ({d.mode})</span>
               </div>
             ))
           )}
@@ -681,7 +701,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
         <span className="logo"><Icon name="microscope" size={18} /></span>
         <strong>CellLab</strong>
         <span className="sep">/</span>
-        <button className="doc" onClick={handleOpenSaveDialog} title="Ubah Nama Proyek">{project.name}</button>
+        <span className="doc" title={hasProjectFile ? 'Nama project diubah melalui File Explorer' : 'Project belum disimpan'}>{project.name}</span>
         <span className="grow" />
         <span className="proto">Prototipe Desktop Ilmiah · Parameter Ilustratif</span>
       </header>
@@ -865,10 +885,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
         initialDrug={editingDrug}
         onClose={() => setDrugModalOpen(false)}
         onSave={(drug) => {
-          onUpdateProject((prev) => ({
-            ...prev,
-            drugs: { ...prev.drugs, [drug.key]: drug }
-          }));
+          onUpdateProject((prev) => addOrUpdateDrug(prev, drug));
           setStatus(`Obat "${drug.name}" disimpan.`);
         }}
       />
@@ -878,10 +895,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
         initialCell={editingCell}
         onClose={() => setCellModalOpen(false)}
         onSave={(cell) => {
-          onUpdateProject((prev) => ({
-            ...prev,
-            cells: { ...prev.cells, [cell.name]: cell }
-          }));
+          onUpdateProject((prev) => addOrUpdateCell(prev, cell));
           setStatus(`Sel "${cell.name}" disimpan.`);
         }}
       />
@@ -893,10 +907,7 @@ export const Workbench: React.FC<WorkbenchProps> = ({
         drugs={project.drugs}
         onClose={() => setTaskModalOpen(false)}
         onSave={(task) => {
-          onUpdateProject((prev) => ({
-            ...prev,
-            tasks: { ...prev.tasks, [task.name]: task }
-          }));
+          onUpdateProject((prev) => addOrUpdateTask(prev, task));
           setStatus(`Tugas "${task.name}" disimpan.`);
         }}
       />

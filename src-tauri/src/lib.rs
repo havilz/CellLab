@@ -97,6 +97,15 @@ fn sanitize_name(name: &str) -> String {
     if sanitized.is_empty() { "CellLabProject".to_string() } else { sanitized }
 }
 
+fn folder_project_name(folder: &std::path::Path, fallback: &str) -> String {
+    folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.strip_suffix(".celllab").unwrap_or(name).to_string())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
 fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(value)
         .map_err(|error| format!("Could not encode {}: {error}", path.display()))?;
@@ -125,6 +134,54 @@ fn read_json_files<T: for<'de> Deserialize<'de>>(directory: &std::path::Path) ->
         .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
         .map(|entry| read_json(&entry.path()))
         .collect()
+}
+
+fn clear_json_files(directory: &std::path::Path) -> Result<(), String> {
+    if !directory.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(directory)
+        .map_err(|error| format!("Could not list {}: {error}", directory.display()))?
+    {
+        let path = entry
+            .map_err(|error| format!("Could not read {}: {error}", directory.display()))?
+            .path();
+        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("Could not remove {}: {error}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_project_drug_references(project: &mut Project) -> Result<(), String> {
+    for drug in project.drugs.values_mut() {
+        if drug.id.is_none() {
+            drug.id = Some(format!("drug-{}", drug.key));
+        }
+    }
+    let drug_ids: Vec<(String, String)> = project
+        .drugs
+        .values()
+        .filter_map(|drug| drug.id.clone().map(|id| (id, drug.key.clone())))
+        .collect();
+
+    for task in project.tasks.values_mut() {
+        for dose in &mut task.doses {
+            let reference = dose
+                .drug_id
+                .take()
+                .or_else(|| dose.drug_key.take())
+                .ok_or_else(|| format!("Task '{}' contains a dose without drugId", task.name))?;
+            let drug_id = drug_ids
+                .iter()
+                .find(|(id, key)| id == &reference || key == &reference)
+                .map(|(id, _)| id.clone())
+                .ok_or_else(|| format!("Task '{}' references unknown drug '{}'", task.name, reference))?;
+            dose.drug_id = Some(drug_id);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -175,8 +232,10 @@ fn save_project_file(
     let target = if parent.join("project.json").is_file() {
         parent
     } else {
-        parent.join(format!("{}.celllab", sanitize_name(&project.name)))
+        parent.join(sanitize_name(&project.name))
     };
+    let mut project = project;
+    project.name = folder_project_name(&target, &project.name);
     std::fs::create_dir_all(target.join("model").join("cells"))
         .and_then(|_| std::fs::create_dir_all(target.join("model").join("drugs")))
         .and_then(|_| std::fs::create_dir_all(target.join("tasks")))
@@ -184,6 +243,16 @@ fn save_project_file(
         .and_then(|_| std::fs::create_dir_all(target.join("units")))
         .and_then(|_| std::fs::create_dir_all(target.join("results")))
         .map_err(|error| format!("Could not create project folder: {error}"))?;
+    for directory in [
+        target.join("model").join("cells"),
+        target.join("model").join("drugs"),
+        target.join("tasks"),
+        target.join("functions"),
+        target.join("units"),
+        target.join("results"),
+    ] {
+        clear_json_files(&directory)?;
+    }
     for legacy_file in [
         target.join("model").join("model.json"),
         target.join("tasks").join("tasks.json"),
@@ -196,7 +265,7 @@ fn save_project_file(
 
     let envelope = ProjectFileEnvelope {
         format: "celllab-project".to_string(),
-        version: 2,
+        version: 3,
         project_id: project.id.clone(),
         project_name: Some(project.name.clone()),
         project_version: Some(project.version.clone()),
@@ -212,13 +281,15 @@ fn save_project_file(
     std::fs::rename(&temporary, &project_json)
         .map_err(|error| format!("Could not finalize project file: {error}"))?;
     for (index, cell) in project.cells.values().enumerate() {
-        write_json(&target.join("model").join("cells").join(format!("{index:04}-{}.json", sanitize_name(&cell.name))), cell)?;
+        write_json(&target.join("model").join("cells").join(format!("{index:04}-{}.json", sanitize_name(&cell.id))), cell)?;
     }
     for (index, drug) in project.drugs.values().enumerate() {
-        write_json(&target.join("model").join("drugs").join(format!("{index:04}-{}.json", sanitize_name(&drug.key))), drug)?;
+        let drug_id = drug.id.as_deref().unwrap_or(&drug.key);
+        write_json(&target.join("model").join("drugs").join(format!("{index:04}-{}.json", sanitize_name(drug_id))), drug)?;
     }
     for (index, task) in project.tasks.values().enumerate() {
-        write_json(&target.join("tasks").join(format!("{index:04}-{}.json", sanitize_name(&task.name))), task)?;
+        let task_id = task.id.as_deref().unwrap_or(&task.name);
+        write_json(&target.join("tasks").join(format!("{index:04}-{}.json", sanitize_name(task_id))), task)?;
     }
     for (index, (key, definition)) in project.custom_functions.iter().enumerate() {
         write_json(&target.join("functions").join(format!("{index:04}-{}.json", sanitize_name(key))), &CustomEntry { key: key.clone(), definition: definition.clone() })?;
@@ -256,25 +327,36 @@ fn load_project_file(path: String) -> Result<ProjectFileLocation, String> {
         return Err("Unsupported CellLab project folder version".to_string());
     }
     if envelope.version == 1 {
-        let project = envelope.project.ok_or_else(|| "Legacy project file has no project data".to_string())?;
+        let mut project = envelope.project.ok_or_else(|| "Legacy project file has no project data".to_string())?;
+        project.name = folder_project_name(&folder, &project.name);
+        normalize_project_drug_references(&mut project)?;
         let legacy_runs = folder.join("results").join("runs.json");
         let simulation_runs = if legacy_runs.is_file() { read_json(&legacy_runs)? } else { Vec::new() };
         return Ok(ProjectFileLocation { project, path, simulation_runs });
     }
-    if envelope.version != 2 {
+    if !matches!(envelope.version, 2 | 3) {
         return Err("Unsupported CellLab project folder version".to_string());
     }
     let cells = read_json_files(&folder.join("model").join("cells"))?
         .into_iter()
-        .map(|cell: Cell| (cell.name.clone(), cell))
+        .map(|cell: Cell| (cell.id.clone(), cell))
         .collect();
     let drugs = read_json_files(&folder.join("model").join("drugs"))?
         .into_iter()
-        .map(|drug: Drug| (drug.key.clone(), drug))
+        .map(|mut drug: Drug| {
+            if drug.id.is_none() {
+                drug.id = Some(format!("drug-{}", drug.key));
+            }
+            let key = drug.id.clone().unwrap_or_else(|| drug.key.clone());
+            (key, drug)
+        })
         .collect();
     let tasks = read_json_files(&folder.join("tasks"))?
         .into_iter()
-        .map(|task: SimulationTask| (task.name.clone(), task))
+        .map(|task: SimulationTask| {
+            let key = task.id.clone().unwrap_or_else(|| task.name.clone());
+            (key, task)
+        })
         .collect();
     let custom_functions = read_json_files::<CustomEntry>(&folder.join("functions"))?
         .into_iter()
@@ -285,7 +367,7 @@ fn load_project_file(path: String) -> Result<ProjectFileLocation, String> {
         .map(|entry| (entry.key, entry.definition))
         .collect();
     let simulation_runs = read_json_files(&folder.join("results"))?;
-    let project = Project {
+    let mut project = Project {
         id: envelope.project_id,
         name: envelope.project_name.ok_or_else(|| "Project manifest has no name".to_string())?,
         version: envelope.project_version.ok_or_else(|| "Project manifest has no version".to_string())?,
@@ -295,6 +377,8 @@ fn load_project_file(path: String) -> Result<ProjectFileLocation, String> {
         custom_functions,
         custom_units,
     };
+    project.name = folder_project_name(&folder, &project.name);
+    normalize_project_drug_references(&mut project)?;
     Ok(ProjectFileLocation { project, path, simulation_runs })
 }
 
@@ -363,16 +447,22 @@ fn resolve_drug(
     if !dose.pct.is_finite() || dose.pct < 0.0 || !dose.t0.is_finite() || dose.t0 < 0.0 {
         return Err("Drug dose percentage and administration time must be non-negative".to_string());
     }
+    let reference = dose
+        .drug_id
+        .as_deref()
+        .or(dose.drug_key.as_deref())
+        .ok_or_else(|| "Drug dose is missing drugId".to_string())?;
     let drug = drugs
-        .get(&dose.drug_key)
-        .ok_or_else(|| format!("Drug '{}' was not found in the project", dose.drug_key))?;
+        .values()
+        .find(|candidate| candidate.id.as_deref() == Some(reference) || candidate.key == reference)
+        .ok_or_else(|| format!("Drug '{}' was not found in the project", reference))?;
     if !matches!(drug.target.as_str(), "cox" | "hk")
         || !drug.ki.is_finite()
         || drug.ki <= 0.0
         || !drug.ref_conc.is_finite()
         || drug.ref_conc < 0.0
     {
-        return Err(format!("Drug '{}' has invalid inhibition parameters", dose.drug_key));
+        return Err(format!("Drug '{}' has invalid inhibition parameters", reference));
     }
 
     Ok(EngineDrug {

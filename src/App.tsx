@@ -39,7 +39,6 @@ export function App() {
           : candidate.name === task.name && candidate.cellId === task.cellId
       ) || task;
       const cell =
-        runProject.cells[runTask.cellName || ''] ||
         Object.values(runProject.cells).find((candidate) => candidate.id === runTask.cellId);
 
       if (!cell) throw new Error(`Sel untuk tugas "${runTask.name}" tidak ditemukan.`);
@@ -122,6 +121,7 @@ export function App() {
         onDeleteSimulationRun={handleDeleteSimulationRun}
         onOpenResult={handleOpenResult}
         onSaveToBackend={handleSaveToBackend}
+        hasProjectFile={Boolean(projectFilePath)}
         onLoadFromBackend={handleLoadFromBackend}
         onOpenProjectFile={handleOpenProjectFile}
       />

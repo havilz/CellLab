@@ -152,7 +152,7 @@ export async function runTaskSimulation(
   const exps: ExperimentScenario[] = [];
   for (let idx = 0; idx < task.doses.length; idx++) {
     const dose = task.doses[idx];
-    const drug = allDrugs[dose.drugKey] || DEFAULT_DRUGS[dose.drugKey];
+    const drug = allDrugs[dose.drugId] || Object.values(allDrugs).find((candidate) => candidate.id === dose.drugId);
     if (!drug) continue;
 
     const conc = (dose.pct / 100) * drug.refConc;

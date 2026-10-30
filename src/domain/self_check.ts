@@ -5,11 +5,16 @@ import { CATALOG } from './constants';
 export function runSelfCheck(): boolean {
   const project = createDefaultProject('Test Project');
   if (project.name !== 'Test Project') throw new Error('Self check failed: project name mismatch');
-  if (!project.cells['Sel Standar']) throw new Error('Self check failed: default cell missing');
+  const defaultCell = Object.values(project.cells)[0];
+  if (!defaultCell || project.cells[defaultCell.id] !== defaultCell) throw new Error('Self check failed: default cell UID index missing');
   if (Object.keys(CATALOG).length !== 6) throw new Error('Self check failed: catalog items length mismatch');
 
   const updated = addOrUpdateCell(project, { id: 'cell-2', name: 'Sel Uji', items: [{ key: 'glukosa', conc: 1.0 }] });
-  if (!updated.cells['Sel Uji']) throw new Error('Self check failed: cell update failed');
+  if (!updated.cells['cell-2']) throw new Error('Self check failed: cell update failed');
+  const renamed = addOrUpdateCell(updated, { ...updated.cells['cell-2'], name: 'Sel Uji Renamed' });
+  if (Object.keys(renamed.cells).length !== Object.keys(updated.cells).length || renamed.cells['cell-2']?.name !== 'Sel Uji Renamed') {
+    throw new Error('Self check failed: cell rename changed entity identity');
+  }
 
   // Verify local ODE simulation solver
   const sim = solveOdeLocally([{ key: 'glukosa', conc: 5.0 }, { key: 'atp', conc: 3.2 }], null);

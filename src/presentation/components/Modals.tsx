@@ -21,12 +21,22 @@ export const DrugModal: React.FC<DrugModalProps> = ({ isOpen, onClose, initialDr
   const [refConc, setRefConc] = useState<number>(initialDrug?.refConc ?? 0.1);
   const [ki, setKi] = useState<number>(initialDrug?.ki ?? 0.1);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(initialDrug?.name || '');
+    setRef(initialDrug?.ref || '');
+    setTarget((initialDrug?.target as 'cox' | 'hk') || 'cox');
+    setRefConc(initialDrug?.refConc ?? 0.1);
+    setKi(initialDrug?.ki ?? 0.1);
+  }, [initialDrug, isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const key = initialDrug?.key || name.toLowerCase().replace(/[^a-z0-9]/g, '_');
     onSave({
+      id: initialDrug?.id || `drug-${Date.now().toString(36)}`,
       key,
       name: name.trim() || 'Obat Baru',
       ref: ref.trim(),
@@ -118,6 +128,20 @@ export const CellModal: React.FC<CellModalProps> = ({ isOpen, onClose, initialCe
     });
     return init;
   });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const nextItems: Record<string, { enabled: boolean; conc: number }> = {};
+    Object.values(CATALOG).forEach((cat) => {
+      const existing = initialCell?.items.find((item) => item.key === cat.key);
+      nextItems[cat.key] = {
+        enabled: !!existing,
+        conc: existing ? existing.conc : cat.def
+      };
+    });
+    setName(initialCell?.name || 'Sel Baru');
+    setItems(nextItems);
+  }, [initialCell, isOpen]);
 
   if (!isOpen) return null;
 
@@ -221,11 +245,19 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [doses, setDoses] = useState<DrugDose[]>(() => initialTask?.doses.map((d) => ({ ...d })) || []);
 
   // Form row to add dose
-  const drugKeys = Object.keys(drugs);
-  const [addDrugKey, setAddDrugKey] = useState<string>(drugKeys[0] || 'parasetamol');
+  const drugIds = Object.values(drugs).map((drug) => drug.id || `drug-${drug.key}`);
+  const [addDrugId, setAddDrugId] = useState<string>(drugIds[0] || 'drug-parasetamol');
   const [addPct, setAddPct] = useState<number>(100);
   const [addT0, setAddT0] = useState<number>(60);
   const [addMode, setAddMode] = useState<'konstan' | 'bolus'>('konstan');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(initialTask?.name || 'Tugas Baru');
+    setCellId(initialTask?.cellId || cells[0]?.id || '');
+    setDoses(initialTask?.doses.map((dose) => ({ ...dose })) || []);
+    setAddDrugId(Object.values(drugs)[0]?.id || (Object.values(drugs)[0] ? `drug-${Object.values(drugs)[0].key}` : 'drug-parasetamol'));
+  }, [initialTask, isOpen]);
 
   if (!isOpen) return null;
 
@@ -234,7 +266,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     setDoses((prev) => [
       ...prev,
       {
-        drugKey: addDrugKey,
+        drugId: addDrugId,
         pct: addPct,
         t0: addT0,
         mode: addMode
@@ -259,7 +291,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     onClose();
   };
 
-  const selectedDrug = drugs[addDrugKey] || DEFAULT_DRUGS[addDrugKey];
+  const selectedDrug = Object.values(drugs).find((drug) => (drug.id || `drug-${drug.key}`) === addDrugId) || DEFAULT_DRUGS[addDrugId];
   const refConc = selectedDrug?.refConc || 0.1;
   const calcConc = (addPct / 100) * refConc;
 
@@ -297,7 +329,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               <div key={i} className="tkrow">
                 <span className="dot" style={{ background: '#378ADD' }} />
                 <span style={{ flex: 1 }}>
-                  {drugs[d.drugKey]?.name || d.drugKey} {d.pct}% @ {d.t0} s ({d.mode})
+                  {Object.values(drugs).find((drug) => (drug.id || `drug-${drug.key}`) === d.drugId)?.name || d.drugId} {d.pct}% @ {d.t0} s ({d.mode})
                 </span>
                 <button
                   type="button"
@@ -316,9 +348,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         <div className="addrow" style={{ marginTop: '10px' }}>
           <label className="full">
             Tambah obat
-            <select value={addDrugKey} onChange={(e) => setAddDrugKey(e.target.value)}>
+            <select value={addDrugId} onChange={(e) => setAddDrugId(e.target.value)}>
               {Object.values(drugs).map((d) => (
-                <option key={d.key} value={d.key}>
+                <option key={d.id || `drug-${d.key}`} value={d.id || `drug-${d.key}`}>
                   {d.name}
                 </option>
               ))}

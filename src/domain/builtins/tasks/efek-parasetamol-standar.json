@@ -1,1 +1,1 @@
-{"name":"Efek Parasetamol (Standar)","doses":[{"drugKey":"parasetamol","pct":100,"t0":60,"mode":"konstan"}]}
+{"name":"Efek Parasetamol (Standar)","doses":[{"drugId":"drug-parasetamol","pct":100,"t0":60,"mode":"konstan"}]}
